@@ -11,35 +11,28 @@ module Delayed
         property :attempts, :default => 0
         property :run_at, Time
         property :locked_at, Time
-        property :failed_at, Time, :default => nil
+        property :failed_at, Time
         timestamps!
 
         before_create :set_default_run_at
-        # before_save do
-        #   debugger
-        #   self.run_at = run_at.utc unless run_at.utc?
-        #   # debugger
-        #   # self.run_at = run_at.to_time.utc if run_at.is_a? ActiveSupport::TimeWithZone
-        #   # self.locked_at = locked_at.to_time.utc if locked_at.is_a? ActiveSupport::TimeWithZone
-        #   # self.failed_at = failed_at.to_time.utc if failed_at.is_a? ActiveSupport::TimeWithZone
-        # end
-        
-        view_by :failed_at_and_locked_by_and_run_at,
-            :map => "function(doc){
-                        if(doc['type'] == 'Delayed::Backend::CouchrestModel::Job') {
-                          emit([doc['failed_at'], doc['locked_by'], doc['run_at']], null);
-                        }
-                     }"
-              
-        view_by :failed_at_and_locked_at_and_run_at,
-            :map => "function(doc){
-                        if(doc['type'] == 'Delayed::Backend::CouchrestModel::Job') {
-                          emit([doc['failed_at'], doc['locked_at'], doc['run_at']], null);
-                        }
-                      }"
 
+        design do
+          view :by_failed_at_and_locked_by_and_run_at,
+              :map => "function(doc){
+                          if(doc['type'] == 'Delayed::Backend::CouchrestModel::Job') {
+                            emit([doc['failed_at'], doc['locked_by'], doc['run_at']], null);
+                          }
+                       }"
+              
+          view :by_failed_at_and_locked_at_and_run_at,
+              :map => "function(doc){
+                          if(doc['type'] == 'Delayed::Backend::CouchrestModel::Job') {
+                            emit([doc['failed_at'], doc['locked_at'], doc['run_at']], null);
+                          }
+                        }"
+        end
         
-        def self.db_time_now; Time.now; end
+        def self.db_time_now; Time.now.utc; end
         
         def self.find_available(worker_name, limit = 5, max_run_time = ::Delayed::Worker.max_run_time)
           ready = ready_jobs
@@ -78,13 +71,13 @@ module Delayed
         private
         
           def self.ready_jobs
-            by_failed_at_and_locked_by_and_run_at(:startkey => [nil, nil, '0'], :endkey => [nil, nil, db_time_now])
+            by_failed_at_and_locked_by_and_run_at.startkey([nil, nil]).endkey([nil, nil, db_time_now]).all
           end
           def self.my_jobs(worker_name)
-            by_failed_at_and_locked_by_and_run_at(:startkey => [nil, worker_name], :endkey => [nil, worker_name, {}])
+            by_failed_at_and_locked_by_and_run_at.startkey([nil, worker_name]).endkey([nil, worker_name, {}]).all
           end
           def self.expired_jobs(max_run_time)
-            by_failed_at_and_locked_at_and_run_at(:startkey => [nil, '0', '0'], :endkey => [nil, db_time_now - max_run_time, db_time_now])
+            by_failed_at_and_locked_at_and_run_at.startkey([nil, '0']).endkey([nil, (db_time_now - max_run_time).utc, db_time_now]).all
           end
           def unlocked?; locked_by.nil?; end
           def expired?(time); locked_at < self.class.db_time_now - time; end
